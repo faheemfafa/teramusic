@@ -1,0 +1,6 @@
+{
+  "name": "Teramusic - Drive Music Player",
+  "description": "A sleek Spotify-inspired music player streaming directly from Google Drive with offline downloads, cross-platform syncing, equalizer, and dark mode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
