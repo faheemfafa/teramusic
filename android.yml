@@ -23,16 +23,15 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
-      - name: Build web project
+      - name: Build web assets
         run: npm run build
 
-      - name: Add Android platform
-        run: npx @capacitor/cli add android || true
-
-      - name: Sync Capacitor
-        run: npx @capacitor/cli sync android
+      - name: Copy web assets to Android assets
+        run: |
+          mkdir -p android/app/src/main/assets/public
+          cp -r dist/* android/app/src/main/assets/public/ || true
 
       - name: Build Android APK
         run: |
