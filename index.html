@@ -1,19 +1,24 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Teramusic - Drive Music Player</title>
-    <meta name="description" content="A sleek Spotify-inspired music player streaming directly from Google Drive with offline downloads, cross-platform syncing, equalizer, and dark mode." />
-    <meta property="og:title" content="Teramusic - Drive Music Player" />
-    <meta property="og:description" content="A sleek Spotify-inspired music player streaming directly from Google Drive with offline downloads, cross-platform syncing, equalizer, and dark mode." />
-    <meta property="og:type" content="website" />
-    <meta name="theme-color" content="#121212" />
-    <meta name="twitter:card" content="summary_large_image" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
+  }
 
+  .sidebar, aside {
+    display: none !important;
+  }
+
+  main, .main-content {
+    margin-left: 0 !important;
+    width: 100vw !important;
+    padding: 12px;
+    padding-bottom: 90px;
+  }
+
+  .player-bar, footer {
+    left: 0 !important;
+    width: 100% !important;
+    position: fixed;
+    bottom: 0;
+    z-index: 999;
+  }
+}
