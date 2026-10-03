@@ -123,25 +123,60 @@ app.post('/api/drive/community-folders', (req, res) => {
   res.json({ success: true, folder: f, totalFolders: communityDriveFolders.length });
 });
 
+const AUDIO_RE = /\.(mp3|wav|m4a|flac|ogg|aac|opus)$/i;
+async function driveJson(url) {
+  const r = await fetch(url);
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e?.error?.message || `Drive API ${r.status}`); }
+  return r.json();
+}
+// Lists audio files in a public folder (and up to 2 levels of subfolders) with the official Drive API.
+async function listDriveFolder(rootId) {
+  const files = []; const queue = [{ id: rootId, depth: 0 }]; let calls = 0;
+  while (queue.length && calls < 30 && files.length < 500) {
+    const { id, depth } = queue.shift();
+    let pageToken = '';
+    do {
+      calls++;
+      const q = encodeURIComponent(`'${id}' in parents and trashed = false`);
+      const j = await driveJson(`https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=nextPageToken,files(id,name,mimeType,size)&key=${DRIVE_KEY}` + (pageToken ? `&pageToken=${pageToken}` : ''));
+      for (const f of j.files || []) {
+        if (f.mimeType === 'application/vnd.google-apps.folder') { if (depth < 2) queue.push({ id: f.id, depth: depth + 1 }); }
+        else if ((f.mimeType || '').startsWith('audio/') || AUDIO_RE.test(f.name || ''))
+          files.push({ id: f.id, name: f.name, size: f.size ? Number(f.size) : undefined });
+      }
+      pageToken = j.nextPageToken || '';
+    } while (pageToken && files.length < 500);
+  }
+  return files;
+}
+
 app.get('/api/drive/inspect-public', async (req, res) => {
   const folderId = String(req.query.id || '');
   if (!/^[\w-]{10,80}$/.test(folderId)) return res.status(400).json({ success: false, error: 'Missing or invalid folder id' });
-  const fallback = { success: true, folderId, folderName: `Google Drive Folder (${folderId.slice(0, 8)})`, filesFound: [], isOpenToAnyoneWithLink: true };
+  const fallbackName = `Google Drive Folder (${folderId.slice(0, 8)})`;
+  let apiError = DRIVE_KEY ? '' : 'DRIVE_API_KEY is not set on the server';
+  if (DRIVE_KEY) {
+    try {
+      const meta = await driveJson(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=name&supportsAllDrives=true&key=${DRIVE_KEY}`);
+      const filesFound = await listDriveFolder(folderId);
+      return res.json({ success: true, folderId, folderName: meta.name || fallbackName, filesFound, isOpenToAnyoneWithLink: true, via: 'api' });
+    } catch (e) { apiError = e.message; console.log('drive api list failed:', apiError); }
+  }
+  // Fallback: scrape the public folder page (unreliable; Google renders it with JavaScript).
   try {
     const r = await fetch(`https://drive.google.com/drive/folders/${folderId}`, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
     });
     const html = await r.text();
-    let folderName = fallback.folderName;
+    let folderName = fallbackName;
     const t = html.match(/<title>(.*?)(?:\s*-\s*Google Drive)?<\/title>/i);
     if (t && t[1] && !t[1].toLowerCase().includes('google drive')) folderName = t[1].trim();
     const files = []; const seen = new Set();
     const re = /\["([a-zA-Z0-9_-]{25,45})",\s*"([^"]+\.(?:mp3|wav|m4a|flac|ogg|aac))"/gi;
     let m;
     while ((m = re.exec(html))) if (!seen.has(m[1])) { seen.add(m[1]); files.push({ id: m[1], name: m[2] }); }
-    res.json({ success: true, folderId, folderName, filesFound: files,
-      isOpenToAnyoneWithLink: !html.includes('Sign in to continue') && !html.includes('Access denied') });
-  } catch { res.json(fallback); }
+    res.json({ success: true, folderId, folderName, filesFound: files, isOpenToAnyoneWithLink: true, via: 'scrape', error: files.length ? undefined : apiError });
+  } catch { res.json({ success: true, folderId, folderName: fallbackName, filesFound: [], isOpenToAnyoneWithLink: true, error: apiError }); }
 });
 
 const syncId = (req) => String(req.params.id).toUpperCase();
