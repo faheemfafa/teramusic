@@ -9,7 +9,12 @@ export interface DriveFetchResult {
 // ---- Standalone-app helpers (work without any server) ----
 export const isNativeApp = (): boolean => !!(window as any).Capacitor?.isNativePlatform?.();
 const KEY_STORE = 'teramusic_drive_key';
-export const getDriveKey = (): string => { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } };
+// Key typed in the app wins; otherwise use one baked in at build time (VITE_DRIVE_API_KEY).
+export const getDriveKey = (): string => {
+  let saved = '';
+  try { saved = localStorage.getItem(KEY_STORE) || ''; } catch { /* ignore */ }
+  return saved || ((import.meta as any).env?.VITE_DRIVE_API_KEY as string) || '';
+};
 export const setDriveKey = (k: string) => { try { localStorage.setItem(KEY_STORE, k.trim()); } catch { /* ignore */ } };
 
 /** Direct Drive API stream when a key is saved on this device; otherwise via the web server's proxy. */
