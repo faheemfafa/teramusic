@@ -97,6 +97,19 @@ const communityDriveFolders = [
 
 // The audio proxy may only talk to these hosts (prevents use as an open proxy).
 const ALLOWED = new Set(['www.googleapis.com', 'drive.google.com', 'drive.usercontent.google.com', 'docs.google.com', 'commondatastorage.googleapis.com']);
+// Optional: a Google API key (kept server-side). Public Drive files then stream through the official API,
+// which works reliably from cloud servers, unlike the anonymous drive.google.com/uc download link.
+const DRIVE_KEY = process.env.DRIVE_API_KEY || '';
+function rewrite(u, hasAuth) {
+  const x = new URL(u);
+  const id = x.searchParams.get('id') || '';
+  if (DRIVE_KEY && !hasAuth && x.hostname === 'drive.google.com' && x.pathname === '/uc' && /^[\w-]+$/.test(id))
+    return `https://www.googleapis.com/drive/v3/files/${id}?alt=media&supportsAllDrives=true&key=${DRIVE_KEY}`;
+  if (DRIVE_KEY && !hasAuth && x.hostname === 'www.googleapis.com' && x.pathname.startsWith('/drive/v3/') && !x.searchParams.has('key')) {
+    x.searchParams.set('key', DRIVE_KEY); return x.toString();
+  }
+  return u;
+}
 const okHost = (u) => { try { const x = new URL(u); return x.protocol === 'https:' && ALLOWED.has(x.hostname); } catch { return false; } };
 
 app.get('/api/drive/community-folders', (_q, res) => res.json({ success: true, folders: communityDriveFolders }));
@@ -144,6 +157,7 @@ app.post('/api/sync/:id', (req, res) => {
 app.get('/api/proxy-audio', async (req, res) => {
   let target = String(req.query.url || '');
   if (!okHost(target)) return res.status(400).send('URL not allowed');
+  target = rewrite(target, !!req.headers.authorization);
   const headers = {};
   // Only ever send the user's Google token to Google's API host.
   const auth = (u) => (new URL(u).hostname === 'www.googleapis.com' && req.headers.authorization ? { Authorization: req.headers.authorization } : {});
@@ -160,6 +174,10 @@ app.get('/api/proxy-audio', async (req, res) => {
       }
       break;
     }
+    const ct = r.headers.get('content-type') || '';
+    console.log(`proxy ${r.status} ${ct} via ${new URL(target).hostname}${DRIVE_KEY ? ' (api key set)' : ' (no api key)'}`);
+    if (r.status < 400 && ct.startsWith('text/html'))
+      return res.status(502).send('Google returned a web page instead of audio (file not shared, or download blocked).');
     res.status(r.status);
     for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified']) {
       const v = r.headers.get(h); if (v) res.setHeader(h, v);
