@@ -18,6 +18,10 @@ import {
   fetchCommunityDriveFolders,
   inspectPublicDriveFolder,
   parseTrackInfoFromFileName,
+  driveStreamUrl,
+  getDriveKey,
+  setDriveKey,
+  isNativeApp,
   publishDriveFolderToCommunity,
 } from '../services/googleDriveService';
 import { DriveFolder, Track } from '../types';
@@ -37,7 +41,8 @@ export const DriveFolderModal: React.FC<DriveFolderModalProps> = ({
   const [folderInput, setFolderInput] = useState('');
   const [folderName, setFolderName] = useState('');
   const [folderDescription, setFolderDescription] = useState('');
-  const [shareWithCommunity, setShareWithCommunity] = useState(true);
+  const [shareWithCommunity, setShareWithCommunity] = useState(!isNativeApp());
+  const [apiKeyInput, setApiKeyInput] = useState(getDriveKey());
   const [authorName, setAuthorName] = useState('Music Explorer');
   const [loading, setLoading] = useState(false);
   const [inspecting, setInspecting] = useState(false);
@@ -87,7 +92,7 @@ export const DriveFolderModal: React.FC<DriveFolderModalProps> = ({
     }, 600);
 
     return () => clearTimeout(timeout);
-  }, [folderInput]);
+  }, [folderInput, apiKeyInput]);
 
   if (!isOpen) return null;
 
@@ -117,9 +122,7 @@ export const DriveFolderModal: React.FC<DriveFolderModalProps> = ({
           const match = line.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || line.match(/id=([a-zA-Z0-9_-]+)/);
           const fileId = match ? match[1] : line.trim();
           if (fileId) {
-            const streamUrl = `/api/proxy-audio?url=${encodeURIComponent(
-              `https://drive.google.com/uc?export=download&id=${fileId}`
-            )}`;
+            const streamUrl = driveStreamUrl(fileId);
             customTracks.push({
               id: `gdrive-${fileId}`,
               title: `${name} - Track 0${idx + 1}`,
@@ -145,9 +148,7 @@ export const DriveFolderModal: React.FC<DriveFolderModalProps> = ({
         detectedFolder.filesFound.forEach((file: any) => {
           if (!customTracks.some((t) => t.driveFileId === file.id)) {
             const info = parseTrackInfoFromFileName(file.name);
-            const streamUrl = `/api/proxy-audio?url=${encodeURIComponent(
-              `https://drive.google.com/uc?export=download&id=${file.id}`
-            )}`;
+            const streamUrl = driveStreamUrl(file.id);
             customTracks.push({
               id: `gdrive-${file.id}`,
               title: info.title,
@@ -392,6 +393,19 @@ export const DriveFolderModal: React.FC<DriveFolderModalProps> = ({
                   <span>Found: {detectedFolder.folderName} ({detectedFolder.filesFound?.length ?? 0} songs){detectedFolder.error ? ' - ' + detectedFolder.error : ''}</span>
                 </div>
               )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-neutral-300 uppercase tracking-wider mb-1.5">
+                Google API key {isNativeApp() ? '(required in the app)' : '(optional)'}
+              </label>
+              <input
+                type="password"
+                placeholder="Paste once - saved on this device only"
+                value={apiKeyInput}
+                onChange={(e) => { setApiKeyInput(e.target.value); setDriveKey(e.target.value); }}
+                className="w-full bg-[#181818] border border-neutral-700 rounded-lg px-3.5 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#1db954]"
+              />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

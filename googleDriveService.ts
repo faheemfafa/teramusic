@@ -5,6 +5,55 @@ export interface DriveFetchResult {
   tracks: Track[];
 }
 
+
+// ---- Standalone-app helpers (work without any server) ----
+export const isNativeApp = (): boolean => !!(window as any).Capacitor?.isNativePlatform?.();
+const KEY_STORE = 'teramusic_drive_key';
+export const getDriveKey = (): string => { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } };
+export const setDriveKey = (k: string) => { try { localStorage.setItem(KEY_STORE, k.trim()); } catch { /* ignore */ } };
+
+/** Direct Drive API stream when a key is saved on this device; otherwise via the web server's proxy. */
+export function driveStreamUrl(fileId: string): string {
+  const key = getDriveKey();
+  if (key) return `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true&key=${key}`;
+  return `/api/proxy-audio?url=${encodeURIComponent(`https://drive.google.com/uc?export=download&id=${fileId}`)}`;
+}
+
+const AUDIO_RE = /\.(mp3|wav|m4a|flac|ogg|aac|opus)$/i;
+async function driveGet(url: string): Promise<any> {
+  const r = await fetch(url);
+  if (!r.ok) {
+    let m = '';
+    try { m = (await r.json())?.error?.message || ''; } catch { /* ignore */ }
+    throw new Error(m || `Drive API ${r.status}`);
+  }
+  return r.json();
+}
+async function listFolderWithKey(rootId: string, key: string) {
+  const files: { id: string; name: string; size?: number }[] = [];
+  const queue: { id: string; depth: number }[] = [{ id: rootId, depth: 0 }];
+  let calls = 0;
+  while (queue.length && calls < 30 && files.length < 500) {
+    const { id, depth } = queue.shift()!;
+    let pageToken = '';
+    do {
+      calls++;
+      const q = encodeURIComponent(`'${id}' in parents and trashed = false`);
+      const j = await driveGet(
+        `https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true&fields=nextPageToken,files(id,name,mimeType,size)&key=${key}` +
+          (pageToken ? `&pageToken=${pageToken}` : '')
+      );
+      for (const f of j.files || []) {
+        if (f.mimeType === 'application/vnd.google-apps.folder') { if (depth < 2) queue.push({ id: f.id, depth: depth + 1 }); }
+        else if ((f.mimeType || '').startsWith('audio/') || AUDIO_RE.test(f.name || ''))
+          files.push({ id: f.id, name: f.name, size: f.size ? Number(f.size) : undefined });
+      }
+      pageToken = j.nextPageToken || '';
+    } while (pageToken && files.length < 500);
+  }
+  return files;
+}
+
 export function extractDriveFolderId(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
@@ -31,6 +80,19 @@ export async function inspectPublicDriveFolder(folderId: string): Promise<{
   isOpenToAnyoneWithLink: boolean;
   error?: string;
 }> {
+  const key = getDriveKey();
+  if (key) {
+    try {
+      const meta = await driveGet(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=name&supportsAllDrives=true&key=${key}`);
+      const filesFound = await listFolderWithKey(folderId, key);
+      return { folderName: meta.name || `Drive Folder (${folderId.slice(0, 6)})`, filesFound, isOpenToAnyoneWithLink: true };
+    } catch (e: any) {
+      return { folderName: `Drive Folder (${folderId.slice(0, 6)})`, filesFound: [], isOpenToAnyoneWithLink: true, error: e?.message || 'Drive error' };
+    }
+  }
+  if (isNativeApp()) {
+    return { folderName: `Drive Folder (${folderId.slice(0, 6)})`, filesFound: [], isOpenToAnyoneWithLink: true, error: 'Paste your Google API key below to load songs' };
+  }
   try {
     const res = await fetch(`/api/drive/inspect-public?id=${folderId}`);
     if (res.ok) {
@@ -53,6 +115,7 @@ export async function inspectPublicDriveFolder(folderId: string): Promise<{
 }
 
 export async function fetchCommunityDriveFolders(): Promise<DriveFolder[]> {
+  if (isNativeApp()) return []; // community list needs the web server
   try {
     const res = await fetch('/api/drive/community-folders');
     if (res.ok) {
@@ -119,11 +182,9 @@ export function getAudioStreamUrl(fileId: string, accessToken?: string): string 
   if (accessToken) {
     // Via Google Drive API media endpoint
     const directUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-    return `/api/proxy-audio?url=${encodeURIComponent(directUrl)}`;
+    return isNativeApp() ? directUrl : `/api/proxy-audio?url=${encodeURIComponent(directUrl)}`;
   }
-  // Public direct download URL
-  const publicUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-  return `/api/proxy-audio?url=${encodeURIComponent(publicUrl)}`;
+  return driveStreamUrl(fileId);
 }
 
 export async function fetchDriveFolderContents(
